@@ -3,45 +3,45 @@ provider "aws" {
 }
 
 data "aws_vpc" "default" {
-    default = true
+  default = true
 }
 
 data "aws_subnets" "default" {
-    filter {
-        name = "vpc-id"
-        values = [data.aws_vpc.default.id]
-    }
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
 }
 variable "server_port" {
-    description = "The port on which the server will listen"
-    type        = number
-    default     = 8080
+  description = "The port on which the server will listen"
+  type        = number
+  default     = 8080
 }
 
 output "alb_dns_name" {
-    description = "the DNS name of the ALB"
-    value       = aws_lb.example.dns_name
+  description = "the DNS name of the ALB"
+  value       = aws_lb.example.dns_name
 }
 
-resource "aws_launch_configuration" "example" {
-    image_id        = "ami-0cfde0ea8edd312d4"
-    instance_type   = "t3.micro"
-    security_groups = [aws_security_group.instance.id]
+resource "aws_launch_template" "example" {
+  image_id        = "ami-0cfde0ea8edd312d4"
+  instance_type   = "t3.micro"
+  vpc_security_group_ids = [aws_security_group.instance.id]
 
-    user_data = <<-EOF
-                #!/bin/bash
-                echo "Hello, World" > index.html
-                nohup busybox httpd -f -p "${var.server_port}" &
-                EOF
+  # Provide base64-encoded user data script
+  user_data = base64encode(<<EOF
+#!/bin/bash
+echo "Hello, World" > index.html
+nohup busybox httpd -f -p "${var.server_port}" &
+EOF
+  )
 
-#Required when using a launch configuration with an auto scaling group
-    lifecycle {
-        create_before_destroy = true
-    }
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_autoscaling_group" "example" {
-  launch_configuration = aws_launch_configuration.example.name
   vpc_zone_identifier  = data.aws_subnets.default.ids
 
   target_group_arns = [aws_lb_target_group.asg.arn]
@@ -50,6 +50,11 @@ resource "aws_autoscaling_group" "example" {
   min_size = 2
   max_size = 10
 
+  launch_template {
+    id      = aws_launch_template.example.id
+    version = "$Latest"
+  }
+
   tag {
     key                 = "Name"
     value               = "terraform-asg-example"
@@ -57,14 +62,14 @@ resource "aws_autoscaling_group" "example" {
   }
 }
 resource "aws_security_group" "instance" {
-    name = "terraform-example-instance"
+  name = "terraform-example-instance"
 
-    ingress {
-        from_port   = var.server_port
-        to_port     = var.server_port
-        protocol    = "tcp"
-        cidr_blocks = ["0.0.0.0/0"]
-    }
+  ingress {
+    from_port   = var.server_port
+    to_port     = var.server_port
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 }
 
 resource "aws_lb" "example" {
@@ -75,21 +80,21 @@ resource "aws_lb" "example" {
 }
 
 resource "aws_lb_listener" "http" {
-    load_balancer_arn = aws_lb.example.arn
-    port              = 80
-    protocol          = "HTTP"
+  load_balancer_arn = aws_lb.example.arn
+  port              = 80
+  protocol          = "HTTP"
 
-# By default return a simple 404 page
-    default_action {
-        type = "fixed-response"
+  # By default return a simple 404 page
+  default_action {
+    type = "fixed-response"
 
-        fixed_response {
-            content_type = "text/plain"
-            message_body = "404: page not found"
-            status_code  = "404"
-        }
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "404: page not found"
+      status_code  = "404"
     }
-}    
+  }
+}
 
 resource "aws_security_group" "alb" {
   name = "terraform-example-alb"
